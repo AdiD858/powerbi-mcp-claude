@@ -1,6 +1,3 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { z } from 'zod';
 import {
 	listWorkspaces,
 	listReports,
@@ -13,136 +10,147 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-function createServer() {
-	const server = new McpServer({
-		name: 'powerbi-mcp',
-		version: '0.1.0',
-	});
+const TOOLS = [
+	{
+		name: 'list_workspaces',
+		description: 'List all Power BI workspaces (groups) the authenticated user has access to.',
+		inputSchema: { type: 'object', properties: {}, required: [] },
+	},
+	{
+		name: 'list_reports',
+		description: 'List Power BI reports. Optionally filter by workspace ID.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				workspaceId: { type: 'string', description: 'Optional Power BI workspace (group) ID' },
+			},
+		},
+	},
+	{
+		name: 'list_datasets',
+		description: 'List Power BI datasets. Optionally filter by workspace ID.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				workspaceId: { type: 'string', description: 'Optional Power BI workspace (group) ID' },
+			},
+		},
+	},
+	{
+		name: 'get_dataset_schema',
+		description: 'Get the schema (tables, columns, data types) of a Power BI dataset.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				datasetId: { type: 'string', description: 'Power BI dataset ID' },
+				workspaceId: { type: 'string', description: 'Optional workspace ID' },
+			},
+			required: ['datasetId'],
+		},
+	},
+	{
+		name: 'execute_dax',
+		description: 'Execute a DAX query against a Power BI dataset. Returns query results.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				datasetId: { type: 'string', description: 'Power BI dataset ID to query' },
+				query: { type: 'string', description: 'DAX query string (e.g. EVALUATE TOPN(10, Sales))' },
+				workspaceId: { type: 'string', description: 'Optional workspace ID' },
+			},
+			required: ['datasetId', 'query'],
+		},
+	},
+	{
+		name: 'refresh_dataset',
+		description: 'Trigger a refresh of a Power BI dataset.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				datasetId: { type: 'string', description: 'Power BI dataset ID to refresh' },
+				workspaceId: { type: 'string', description: 'Optional workspace ID' },
+			},
+			required: ['datasetId'],
+		},
+	},
+];
 
-	server.tool(
-		'list_workspaces',
-		'List all Power BI workspaces (groups) the authenticated user has access to.',
-		{},
-		async () => {
-			const token = (globalThis as any).__mcpToken;
-			const workspaces = await listWorkspaces(token);
-			return { content: [{ type: 'text' as const, text: JSON.stringify(workspaces, null, 2) }] };
-		},
-	);
-
-	server.tool(
-		'list_reports',
-		'List Power BI reports. Optionally filter by workspace ID.',
-		{ workspaceId: z.string().optional().describe('Optional Power BI workspace (group) ID') },
-		async ({ workspaceId }) => {
-			const token = (globalThis as any).__mcpToken;
-			const reports = await listReports(token, workspaceId);
-			return { content: [{ type: 'text' as const, text: JSON.stringify(reports, null, 2) }] };
-		},
-	);
-
-	server.tool(
-		'list_datasets',
-		'List Power BI datasets. Optionally filter by workspace ID.',
-		{ workspaceId: z.string().optional().describe('Optional Power BI workspace (group) ID') },
-		async ({ workspaceId }) => {
-			const token = (globalThis as any).__mcpToken;
-			const datasets = await listDatasets(token, workspaceId);
-			return { content: [{ type: 'text' as const, text: JSON.stringify(datasets, null, 2) }] };
-		},
-	);
-
-	server.tool(
-		'get_dataset_schema',
-		'Get the schema (tables, columns, data types) of a Power BI dataset.',
-		{
-			datasetId: z.string().describe('Power BI dataset ID'),
-			workspaceId: z.string().optional().describe('Optional workspace ID'),
-		},
-		async ({ datasetId, workspaceId }) => {
-			const token = (globalThis as any).__mcpToken;
-			const schema = await getDatasetSchema(token, datasetId, workspaceId);
-			return { content: [{ type: 'text' as const, text: JSON.stringify(schema, null, 2) }] };
-		},
-	);
-
-	server.tool(
-		'execute_dax',
-		'Execute a DAX query against a Power BI dataset. Returns query results.',
-		{
-			datasetId: z.string().describe('Power BI dataset ID to query'),
-			query: z.string().describe('DAX query string (e.g. EVALUATE TOPN(10, Sales))'),
-			workspaceId: z.string().optional().describe('Optional workspace ID'),
-		},
-		async ({ datasetId, query, workspaceId }) => {
-			const token = (globalThis as any).__mcpToken;
-			const results = await executeDax(token, datasetId, query, workspaceId);
-			return { content: [{ type: 'text' as const, text: JSON.stringify(results, null, 2) }] };
-		},
-	);
-
-	server.tool(
-		'refresh_dataset',
-		'Trigger a refresh of a Power BI dataset.',
-		{
-			datasetId: z.string().describe('Power BI dataset ID to refresh'),
-			workspaceId: z.string().optional().describe('Optional workspace ID'),
-		},
-		async ({ datasetId, workspaceId }) => {
-			const token = (globalThis as any).__mcpToken;
-			const result = await refreshDataset(token, datasetId, workspaceId);
-			return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
-		},
-	);
-
-	return server;
+function jsonrpc(id: unknown, result: unknown) {
+	return Response.json({ jsonrpc: '2.0', id, result });
 }
 
-async function handleRequest(req: Request): Promise<Response> {
-	// Extract Bearer token from Claude.ai and store for tool use
-	const auth = req.headers.get('authorization');
-	if (auth?.startsWith('Bearer ')) {
-		(globalThis as any).__mcpToken = auth.slice(7);
-	}
-
-	const server = createServer();
-	const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-
-	await server.connect(transport);
-
-	const body = await req.text();
-
-	// Create a fake IncomingMessage-like object for the transport
-	const response = await transport.handleRequest({
-		method: req.method,
-		url: req.url,
-		headers: Object.fromEntries(req.headers.entries()),
-		body: body ? JSON.parse(body) : undefined,
-	} as any);
-
-	await server.close();
-
-	if (response) {
-		return new Response(JSON.stringify(response.body), {
-			status: response.statusCode || 200,
-			headers: { 'Content-Type': 'application/json' },
-		});
-	}
-
-	return new Response(JSON.stringify({ error: 'No response from MCP server' }), {
-		status: 500,
-		headers: { 'Content-Type': 'application/json' },
-	});
+function jsonrpcError(id: unknown, code: number, message: string) {
+	return Response.json({ jsonrpc: '2.0', id, error: { code, message } });
 }
 
-export async function GET(req: Request) {
-	return handleRequest(req);
+async function callTool(name: string, args: Record<string, string>, token: string) {
+	switch (name) {
+		case 'list_workspaces':
+			return listWorkspaces(token);
+		case 'list_reports':
+			return listReports(token, args.workspaceId);
+		case 'list_datasets':
+			return listDatasets(token, args.workspaceId);
+		case 'get_dataset_schema':
+			return getDatasetSchema(token, args.datasetId, args.workspaceId);
+		case 'execute_dax':
+			return executeDax(token, args.datasetId, args.query, args.workspaceId);
+		case 'refresh_dataset':
+			return refreshDataset(token, args.datasetId, args.workspaceId);
+		default:
+			throw new Error(`Unknown tool: ${name}`);
+	}
 }
 
 export async function POST(req: Request) {
-	return handleRequest(req);
+	const auth = req.headers.get('authorization') ?? '';
+	const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+
+	let body: { jsonrpc: string; method: string; params?: Record<string, unknown>; id: unknown };
+	try {
+		body = await req.json();
+	} catch {
+		return jsonrpcError(null, -32700, 'Parse error');
+	}
+
+	const { method, params, id } = body;
+
+	if (method === 'initialize') {
+		return jsonrpc(id, {
+			protocolVersion: '2024-11-05',
+			capabilities: { tools: {} },
+			serverInfo: { name: 'powerbi-mcp', version: '0.1.0' },
+		});
+	}
+
+	if (method === 'tools/list') {
+		return jsonrpc(id, { tools: TOOLS });
+	}
+
+	if (method === 'tools/call') {
+		if (!token) return jsonrpcError(id, -32001, 'Missing Authorization Bearer token');
+
+		const toolName = params?.name as string;
+		const toolArgs = (params?.arguments ?? {}) as Record<string, string>;
+
+		try {
+			const result = await callTool(toolName, toolArgs, token);
+			return jsonrpc(id, {
+				content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return jsonrpcError(id, -32000, message);
+		}
+	}
+
+	if (method === 'notifications/initialized') {
+		return new Response(null, { status: 204 });
+	}
+
+	return jsonrpcError(id, -32601, `Method not found: ${method}`);
 }
 
-export async function DELETE(req: Request) {
-	return handleRequest(req);
+export async function GET() {
+	return Response.json({ status: 'Power BI MCP server running' });
 }
