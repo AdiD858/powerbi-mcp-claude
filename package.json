@@ -1,0 +1,24 @@
+{
+	"name": "powerbi-mcp-claude",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.12.1",
+		"axios": "^1.7.7",
+		"next": "14.2.15",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1",
+		"zod": "^3.23.8"
+	},
+	"devDependencies": {
+		"@types/node": "^20",
+		"@types/react": "^18",
+		"@types/react-dom": "^18",
+		"typescript": "^5"
+	}
+}
